@@ -22,11 +22,15 @@ const regionHelp = {
 };
 
 function fmt(n){ return Number(n).toLocaleString('ko-KR'); }
+function anonymousId(storage,key){let id=storage.getItem(key);if(!id){id=crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;storage.setItem(key,id)}return id;}
+const analyticsIdentity={visitor_id:anonymousId(localStorage,'flyConnectomeVisitor'),session_id:anonymousId(sessionStorage,'flyConnectomeSession')};
+function renderAnalytics(data){$('analytics').textContent=`👥 활성 ${fmt(data.active_sessions)} · 누적 ${fmt(data.cumulative_visitors)}`;}
+async function heartbeat(){try{const r=await fetch('/api/analytics/heartbeat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(analyticsIdentity)});if(r.ok)renderAnalytics(await r.json());}catch(_){$('analytics').textContent='👥 방문 집계 연결 중';}}
 async function boot(){
   state.meta = await fetch('/api/meta').then(r=>r.json());
   state.regionHighlight=state.meta.regions.map(()=>0); state.currentRegions=state.meta.regions.map(()=>0);
   $('neurons').textContent=fmt(state.meta.neurons); $('connections').textContent=fmt(state.meta.connections); $('synapses').textContent=fmt(state.meta.synapses);
-  buildStimuli(); buildRegions(); await loadBrain(); connect(); bindControls(); drawLoop();
+  buildStimuli(); buildRegions(); await loadBrain(); connect(); bindControls(); heartbeat(); setInterval(heartbeat,30000); drawLoop();
 }
 function buildStimuli(){
   const box=$('stimulusButtons');

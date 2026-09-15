@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sqlite3
+import threading
 import time
 from collections import deque
 from pathlib import Path
@@ -18,6 +20,7 @@ from scipy import sparse
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data" / "full"
 STATIC = ROOT / "webapp" / "static"
+RUNTIME = ROOT / "data" / "runtime"
 
 REQUIRED_DATA = ("connectome_csr.npz", "node_metadata.npz", "stats.json")
 missing_data = [name for name in REQUIRED_DATA if not (DATA / name).is_file()]
@@ -78,6 +81,68 @@ class WebSocketGate:
 
 
 WS_GATE = WebSocketGate()
+
+
+class AnonymousAnalytics:
+    """Stores only hashes of browser-generated random IDs; never IP addresses."""
+
+    def __init__(self) -> None:
+        RUNTIME.mkdir(parents=True, exist_ok=True)
+        self.connection = sqlite3.connect(RUNTIME / "analytics.sqlite", check_same_thread=False)
+        self.lock = threading.Lock()
+        with self.connection:
+            self.connection.executescript("""
+                CREATE TABLE IF NOT EXISTS visitors (
+                    visitor_hash TEXT PRIMARY KEY,
+                    first_seen INTEGER NOT NULL,
+                    last_seen INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS sessions (
+                    session_hash TEXT PRIMARY KEY,
+                    visitor_hash TEXT NOT NULL,
+                    first_seen INTEGER NOT NULL,
+                    last_seen INTEGER NOT NULL
+                );
+            """)
+
+    @staticmethod
+    def _hash(value: str) -> str:
+        import hashlib
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _valid(value: object) -> bool:
+        return isinstance(value, str) and 16 <= len(value) <= 128 and value.replace("-", "").isalnum()
+
+    def heartbeat(self, visitor_id: object, session_id: object) -> dict:
+        if not self._valid(visitor_id) or not self._valid(session_id):
+            raise ValueError("Invalid anonymous session identifier")
+        now = int(time.time())
+        visitor_hash, session_hash = self._hash(visitor_id), self._hash(session_id)
+        with self.lock, self.connection:
+            self.connection.execute(
+                "INSERT INTO visitors(visitor_hash, first_seen, last_seen) VALUES (?, ?, ?) "
+                "ON CONFLICT(visitor_hash) DO UPDATE SET last_seen=excluded.last_seen",
+                (visitor_hash, now, now),
+            )
+            self.connection.execute(
+                "INSERT INTO sessions(session_hash, visitor_hash, first_seen, last_seen) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(session_hash) DO UPDATE SET last_seen=excluded.last_seen",
+                (session_hash, visitor_hash, now, now),
+            )
+            # Session hashes are anonymous and only retained for a short operational window.
+            self.connection.execute("DELETE FROM sessions WHERE last_seen < ?", (now - 30 * 24 * 3600,))
+            return self._summary(now)
+
+    def _summary(self, now: int) -> dict:
+        active = self.connection.execute(
+            "SELECT COUNT(*) FROM sessions WHERE last_seen >= ?", (now - 90,)
+        ).fetchone()[0]
+        visitors = self.connection.execute("SELECT COUNT(*) FROM visitors").fetchone()[0]
+        return {"active_sessions": int(active), "cumulative_visitors": int(visitors), "privacy": "anonymous_id_hashes_only"}
+
+
+ANALYTICS = AnonymousAnalytics()
 
 
 class BrainSession:
@@ -533,6 +598,14 @@ def health():
 @app.get("/api/meta")
 def meta():
     return JSONResponse({**STATS, "tick_hz": 8, "limitations": "Connectome topology and synapse counts are measured data; dynamics, stimulus strength and game decoder are explicit models."})
+
+
+@app.post("/api/analytics/heartbeat")
+async def analytics_heartbeat(payload: dict):
+    try:
+        return ANALYTICS.heartbeat(payload.get("visitor_id"), payload.get("session_id"))
+    except ValueError:
+        return JSONResponse({"detail": "Invalid anonymous session identifier"}, status_code=400)
 
 
 @app.get("/api/positions")

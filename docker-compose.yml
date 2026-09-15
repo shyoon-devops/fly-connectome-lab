@@ -8,6 +8,11 @@ services:
     environment:
       TZ: Asia/Seoul
       DEPLOYMENT_MODE: server
+      MAX_WS_CONNECTIONS: 12
+      MAX_WS_PER_IP: 2
+      MAX_WS_MESSAGES_PER_SECOND: 24
+    volumes:
+      - ./data/runtime:/app/data/runtime
     deploy:
       resources:
         limits:
