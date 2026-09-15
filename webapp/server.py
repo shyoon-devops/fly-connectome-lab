@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import time
 from collections import deque
 from pathlib import Path
 
 import numpy as np
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 from scipy import sparse
 
 
@@ -32,6 +35,49 @@ STATS = json.loads((DATA / "stats.json").read_text(encoding="utf-8"))
 POSITIONS = META["soma"].astype("<f4")
 REGION_CODE = META["region_code"]
 POSITION_BYTES = POSITIONS.tobytes() + REGION_CODE.tobytes()
+
+MAX_WS_CONNECTIONS = int(os.getenv("MAX_WS_CONNECTIONS", "12"))
+MAX_WS_PER_IP = int(os.getenv("MAX_WS_PER_IP", "2"))
+MAX_WS_MESSAGES_PER_SECOND = int(os.getenv("MAX_WS_MESSAGES_PER_SECOND", "24"))
+MAX_WS_MESSAGE_BYTES = 8 * 1024
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        return response
+
+
+class WebSocketGate:
+    """Small in-process guard for an intentionally public, compute-heavy demo."""
+
+    def __init__(self) -> None:
+        self.lock = asyncio.Lock()
+        self.total = 0
+        self.by_ip: dict[str, int] = {}
+
+    async def acquire(self, ip: str) -> bool:
+        async with self.lock:
+            if self.total >= MAX_WS_CONNECTIONS or self.by_ip.get(ip, 0) >= MAX_WS_PER_IP:
+                return False
+            self.total += 1
+            self.by_ip[ip] = self.by_ip.get(ip, 0) + 1
+            return True
+
+    async def release(self, ip: str) -> None:
+        async with self.lock:
+            self.total = max(0, self.total - 1)
+            remaining = self.by_ip.get(ip, 1) - 1
+            if remaining > 0:
+                self.by_ip[ip] = remaining
+            else:
+                self.by_ip.pop(ip, None)
+
+
+WS_GATE = WebSocketGate()
 
 
 class BrainSession:
@@ -475,7 +521,8 @@ class BrainSession:
             self.arena_learning = bool(message.get("learning", self.arena_learning))
 
 
-app = FastAPI(title="Full MaleCNS Brain Lab")
+app = FastAPI(title="Full MaleCNS Brain Lab", docs_url=None, redoc_url=None, openapi_url=None)
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 @app.get("/api/health")
@@ -495,18 +542,37 @@ def positions():
 
 @app.websocket("/ws/sim")
 async def simulation_socket(websocket: WebSocket):
+    # Cloudflare supplies this header; fall back to the transport peer for local use.
+    client_ip = websocket.headers.get("cf-connecting-ip") or (websocket.client.host if websocket.client else "unknown")
+    if not await WS_GATE.acquire(client_ip):
+        await websocket.close(code=1013, reason="Connection limit reached")
+        return
     await websocket.accept()
     session = BrainSession()
     last_snapshot = None
     dirty = True
+    message_times: deque[float] = deque()
     try:
         await websocket.send_json({"type": "meta", **STATS})
         while True:
             try:
-                message = await asyncio.wait_for(websocket.receive_json(), timeout=.125)
+                raw = await asyncio.wait_for(websocket.receive_text(), timeout=.125)
+                if len(raw.encode("utf-8")) > MAX_WS_MESSAGE_BYTES:
+                    await websocket.close(code=1009, reason="Message too large")
+                    return
+                now = time.monotonic()
+                message_times.append(now)
+                while message_times and now - message_times[0] > 1.0:
+                    message_times.popleft()
+                if len(message_times) > MAX_WS_MESSAGES_PER_SECOND:
+                    await websocket.close(code=1013, reason="Message rate exceeded")
+                    return
+                message = json.loads(raw)
+                if not isinstance(message, dict):
+                    continue
                 session.handle(message)
                 dirty = True
-            except asyncio.TimeoutError:
+            except (asyncio.TimeoutError, json.JSONDecodeError):
                 pass
             if session.running:
                 await asyncio.to_thread(session.step)
@@ -517,6 +583,8 @@ async def simulation_socket(websocket: WebSocket):
             await websocket.send_json(last_snapshot)
     except WebSocketDisconnect:
         return
+    finally:
+        await WS_GATE.release(client_ip)
 
 
 app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")
