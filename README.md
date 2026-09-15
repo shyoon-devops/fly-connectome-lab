@@ -46,6 +46,14 @@ After data preparation, run `docker compose up --build`. The default mapping is
 loopback-only (`127.0.0.1:8510`); use an authenticated reverse proxy or
 Cloudflare Tunnel for public access, never a directly exposed app port.
 
+## Anonymous visit counter
+
+The public UI can show active sessions (seen within the previous 90 seconds)
+and cumulative browser visitors. It creates random browser-local visitor and
+session IDs, and the server stores only their SHA-256 hashes—never IP addresses,
+account details, or browser metadata. Session records older than 30 days are
+removed automatically.
+
 ## Validation
 
 ```bash
