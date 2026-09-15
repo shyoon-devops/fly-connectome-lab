@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MaleCNS Whole-Brain Lab</title>
+  <link rel="stylesheet" href="/style.css?v=20260911-2" />
+</head>
+<body>
+  <header>
+    <div>
+      <div class="eyebrow">DROSOPHILA · MALECNS v1.0</div>
+      <h1>Whole-Brain <span>Live Lab</span></h1>
+      <p>공식 MaleCNS 전체 커넥톰이 NeuroMechFly v2의 3D 물리 몸체를 감각하고 움직입니다.</p>
+    </div>
+    <div id="connection" class="status"><i></i> 연결 중</div>
+  </header>
+
+  <section class="metrics">
+    <div><b id="neurons">166,700</b><span>전체 주석 뉴런</span></div>
+    <div><b id="connections">25,582,938</b><span>방향성 연결</span></div>
+    <div><b id="synapses">124,177,632</b><span>시냅스</span></div>
+    <div><b id="activeCount">0</b><span>현재 활성 뉴런</span></div>
+    <div><b id="tick">0</b><span>전체-뇌 스텝</span></div>
+  </section>
+
+  <section class="card arena-section">
+    <div class="game-head">
+      <div>
+        <div class="card-title"><span>01</span> MaleCNS × NeuroMechFly · 3D 물리 폐루프</div>
+        <p class="muted">micro-CT 기반 관절 몸체 · MuJoCo 중력/마찰/충돌/접촉 · 배치형 먹이/빛/포식자/바람/열/장애물 · 걷기와 비행 · 전체 뇌 자동조종</p>
+      </div>
+      <div class="physics-badges"><span>MuJoCo 3.9 WASM</span><span>dt 0.1 ms</span><span>gravity 9.81 m/s²</span></div>
+    </div>
+    <div class="physics-stage">
+      <iframe id="nmfFrame" src="/nmf/game/game.html?v=20260912-4" title="NeuroMechFly v2 MuJoCo 3D physics simulator" allow="gamepad; fullscreen"></iframe>
+    </div>
+    <p class="physics-note"><b>실측/공식 모델:</b> MaleCNS 배선·세포 주석, NeuroMechFly v2 micro-CT 형태와 관절 모델. <b>명시적 모델:</b> 오브젝트→감각뉴런 변환, DN→CPG decoder, 날개 형상을 사용하는 준정상 양력·추력 비행. 비행은 CFD가 아니며 측정 커넥톰은 학습 중 변경하지 않습니다.</p>
+  </section>
+
+  <main>
+    <aside class="card controls">
+      <div class="card-title"><span>02</span> 감각 자극</div>
+      <p class="muted">버튼의 숫자는 해당 주석 세포 수입니다.</p>
+      <div id="stimulusButtons" class="stimuli"></div>
+      <label>자극 세기 <output id="intensityValue">1.00</output></label>
+      <input id="intensity" type="range" min="0.1" max="3" value="1" step="0.1" />
+      <label>지속 스텝 <output id="durationValue">25</output></label>
+      <input id="duration" type="range" min="1" max="100" value="25" />
+      <div class="button-row">
+        <button id="pauseButton" class="secondary">시뮬레이션 시작</button>
+        <button id="resetButton" class="secondary">뇌 상태 초기화</button>
+      </div>
+      <div class="model-note">
+        <b>측정 데이터</b> 뉴런, 연결 방향, 시냅스 수, 전달물질 예측<br />
+        <b>시뮬레이션 가정</b> 시간상수, 자극 세기, 활성 함수, 게임 readout
+      </div>
+    </aside>
+
+    <section class="card brain-card">
+      <div class="card-title"><span>03</span> 전체 뇌 3D soma 활성 지도</div>
+      <div class="brain-toolbar">
+        <span>166,700개 실제 soma 좌표 · 마우스로 회전 · 휠로 확대</span>
+        <div class="brain-toolbar-actions">
+          <span><i class="dot excitatory"></i>흥분 <i class="dot inhibitory"></i>억제 <i class="dot response"></i>자극 후 증가 영역</span>
+          <button id="autoRotateButton" class="view-button active" aria-pressed="true">↻ 자동 회전 켜짐</button>
+          <button id="resetBrainView" class="view-button">시점 초기화</button>
+        </div>
+      </div>
+      <canvas id="brainCanvas"></canvas>
+      <div id="loadingBrain" class="loading">166,700개 soma 좌표 로딩 중…</div>
+      <section id="stimulusInsight" class="stimulus-insight idle" aria-live="polite">
+        <div class="insight-kicker">자극 변화 안내</div>
+        <h2>왼쪽에서 자극을 눌러보세요</h2>
+        <p>누르기 전과 후를 자동으로 비교해서, 가장 많이 변한 뇌 영역을 여기에 바로 알려드립니다.</p>
+        <div class="insight-placeholder">자극 전 저장 → 신호 전파 관찰 → 가장 큰 변화 표시</div>
+      </section>
+    </section>
+
+    <aside class="card activity-card">
+      <div class="card-title"><span>04</span> 영역별 활성</div>
+      <div id="regionBars" class="region-bars"></div>
+      <canvas id="activityChart" width="500" height="220"></canvas>
+      <div class="card-title compact"><span>05</span> 가장 활성화된 뉴런</div>
+      <div class="table-wrap">
+        <table><thead><tr><th>cell type</th><th>superclass</th><th>활성</th></tr></thead><tbody id="topNeurons"></tbody></table>
+      </div>
+    </aside>
+  </main>
+
+  <section class="card game-section">
+    <div class="game-head">
+      <div>
+        <div class="card-title"><span>06</span> Connectome Saber · 폐루프 학습</div>
+        <p class="muted">노트 위치 → 시각 감각뉴런 → 전체 166,700뉴런 전파 → 행동 readout → 점수 보상 → policy update</p>
+      </div>
+      <div class="game-controls">
+        <button id="gameButton">게임 시작</button>
+        <label class="switch"><input id="learningToggle" type="checkbox" checked /><span></span> 보상 학습</label>
+        <button id="resetLearning" class="secondary">학습 초기화</button>
+      </div>
+    </div>
+    <div class="game-grid">
+      <canvas id="gameCanvas" width="760" height="360"></canvas>
+      <div class="scoreboard">
+        <div><span>SCORE</span><b id="score">0000000</b></div>
+        <div><span>COMBO</span><b id="combo">0</b></div>
+        <div><span>최근 정확도</span><b id="accuracy">0%</b></div>
+        <div><span>시도 / 성공</span><b><em id="trials">0</em> / <em id="hits">0</em></b></div>
+        <div class="reward"><span>최근 보상</span><b id="reward">0.00</b></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p><b>주의:</b> 이것은 살아 있는 뇌의 복제가 아닙니다. 커넥톰은 정적인 배선 지도이며, 화면의 시간 변화와 학습은 명시된 계산 모델입니다.</p>
+    <span><a href="https://male-cns.janelia.org/" target="_blank" rel="noreferrer">MaleCNS 원 데이터 ↗</a> · <a href="https://github.com/NeLy-EPFL/flygym" target="_blank" rel="noreferrer">FlyGym / NeuroMechFly v2 ↗</a> · <a href="/nmf/NOTICE.txt" target="_blank">라이선스·출처 ↗</a></span>
+  </footer>
+  <script src="/app.js?v=20260912-4"></script>
+</body>
+</html>

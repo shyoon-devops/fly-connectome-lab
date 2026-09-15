@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MaleCNS × NeuroMechFly 3D Physics</title>
+<style>
+  :root { --fg: #e6e8eb; --muted: #9aa0a6; --accent: #8c9eff;
+          --stage-a: #2a2d36; --stage-b: #14161b; --hud-bg: rgba(20,22,27,.72); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        color: var(--fg); background: #14161b; }
+  #stage { position: relative; width: 100vw; height: 100vh;
+           background: radial-gradient(circle at 50% 30%, var(--stage-a) 0%, var(--stage-b) 100%); }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+
+  /* top-left: level + timer (below the level bar) */
+  #hud { position: absolute; left: 14px; top: 58px; z-index: 4; pointer-events: none;
+         text-shadow: 0 1px 3px rgba(0,0,0,.7); }
+  #level { font-size: 13px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+  #level .chip { display: inline-block; width: 10px; height: 10px; border-radius: 3px;
+        margin-right: 7px; vertical-align: middle; background: var(--accent); }
+  #timer { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  #best { font-size: 12px; color: var(--muted); margin-top: 1px; }
+
+  /* top-right: realtime/fps (below the level bar) */
+  #stats { position: absolute; right: 12px; top: 56px; z-index: 4; font-size: 11px;
+        color: rgba(255,255,255,.5); pointer-events: none; font-variant-numeric: tabular-nums;
+        text-shadow: 0 1px 2px rgba(0,0,0,.6); text-align: right; }
+  #neural-hud { position:absolute; right:12px; top:104px; z-index:5; width:225px;
+        padding:12px 14px; border:1px solid rgba(88,242,176,.28); border-radius:10px;
+        background:rgba(7,13,11,.78); backdrop-filter:blur(7px); font-size:11px; }
+  #neural-hud .nh-title { color:#58f2b0; font-weight:700; letter-spacing:.08em; margin-bottom:8px; }
+  #neural-hud .nh-row { display:flex; justify-content:space-between; color:var(--muted); margin:4px 0; }
+  #neural-hud .nh-row b { color:#eef8f4; font-variant-numeric:tabular-nums; }
+  #neural-hud .nh-action { margin-top:8px; color:#fff; font-size:13px; font-weight:700; }
+  #neural-hud .nh-bar { height:4px; background:#182720; margin-top:5px; overflow:hidden; }
+  #neural-hud .nh-bar i { display:block; height:100%; width:0; background:#58f2b0; transition:width .15s; }
+  #neural-hud .nh-controls { display:grid; grid-template-columns:1fr 1fr; gap:5px; margin-top:9px; }
+  #neural-hud button { border:1px solid rgba(88,242,176,.32); background:#10281f; color:#c9eddd;
+        border-radius:6px; padding:6px 5px; font-size:10px; cursor:pointer; }
+  #neural-hud button:hover { background:#194231; }
+  #neural-hud #looming { grid-column:1/-1; border-color:rgba(255,102,129,.5); background:#3a1820; color:#ffd9df; }
+  #neural-hud #upright { grid-column:1/-1; border-color:rgba(142,233,255,.45); background:#14313a; color:#d8f7ff; }
+  #neural-hud .mode-row { display:grid; grid-template-columns:repeat(3,1fr); gap:4px; margin-top:8px; }
+  #neural-hud .mode-row button.active { background:#235c46; border-color:#58f2b0; color:#fff; }
+  #flight-state { color:#8ee9ff; }
+
+  /* live sensory world / object placement console */
+  #stimulus-hud { position:absolute; left:14px; top:140px; z-index:5; width:258px;
+        padding:12px; border:1px solid rgba(142,233,255,.3); border-radius:11px;
+        background:rgba(7,13,16,.82); backdrop-filter:blur(8px); font-size:11px; }
+  #stimulus-hud .sh-title { display:flex; justify-content:space-between; color:#8ee9ff;
+        font-weight:800; letter-spacing:.07em; margin-bottom:8px; }
+  #stimulus-hud .sh-title small { color:#7595a0; letter-spacing:0; font-weight:600; }
+  #reaction { min-height:34px; color:#fff; font-size:13px; font-weight:750; line-height:1.35; margin:5px 0 8px; }
+  .sense-row { display:grid; grid-template-columns:42px 1fr 34px; align-items:center; gap:6px; margin:4px 0; color:#aebbc0; }
+  .sense-row i { display:block; height:5px; background:#13262b; overflow:hidden; border-radius:5px; }
+  .sense-row i b { display:block; height:100%; width:0; background:#8ee9ff; transition:width .12s; }
+  .sense-row output { text-align:right; color:#dbe9ed; font-variant-numeric:tabular-nums; }
+  #object-dock { border-top:1px solid rgba(255,255,255,.1); margin-top:9px; padding-top:9px; }
+  #object-dock .hint { color:#86969b; line-height:1.35; margin-bottom:7px; }
+  .object-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:5px; }
+  #stimulus-hud button { border:1px solid rgba(142,233,255,.25); background:#10232a; color:#d8f5ff;
+        border-radius:6px; padding:6px 3px; font-size:10px; cursor:pointer; }
+  #stimulus-hud button:hover, #stimulus-hud button.armed { border-color:#8ee9ff; background:#17404c; }
+  .world-actions { display:grid; grid-template-columns:repeat(3,1fr); gap:5px; margin-top:5px; }
+  .world-actions button { color:#aab8bc !important; background:#151d20 !important; }
+  #stimulus-count { color:#8ee9ff; font-variant-numeric:tabular-nums; }
+
+  /* bottom: controls help */
+  #help { position: absolute; left: 50%; transform: translateX(-50%); bottom: 12px; z-index: 4;
+        font-size: 12px; color: rgba(255,255,255,.72); pointer-events: none; text-align: center;
+        text-shadow: 0 1px 2px rgba(0,0,0,.7); line-height: 1.5; max-width: 92vw; }
+  #help kbd { background: rgba(255,255,255,.13); border: 1px solid rgba(255,255,255,.22);
+        border-radius: 4px; padding: 1px 5px; font-size: 11px; font-family: inherit; }
+  #help .row2 { color: var(--muted); margin-top: 3px; }
+  #help .row2.pad { color: var(--accent); }
+
+  /* top bar: a solid strip across the top holding the three level tabs on one
+     line; kept above the overlay (z-index 6) so you can always switch levels,
+     even from the info / countdown / finish screens. */
+  #levels { position: absolute; top: 0; left: 0; width: 100%; z-index: 7;
+        display: flex; justify-content: center; align-items: center; gap: 8px;
+        padding: 8px 12px; background: #1b1e24;
+        border-bottom: 1px solid rgba(255,255,255,.10); box-shadow: 0 2px 12px rgba(0,0,0,.4); }
+  #levels button { pointer-events: auto; font: inherit; font-size: 12.5px; font-weight: 600;
+        color: var(--fg); background: transparent; border: 1px solid rgba(255,255,255,.16);
+        border-radius: 8px; padding: 7px 14px; cursor: pointer;
+        display: flex; align-items: center; gap: 7px; white-space: nowrap;
+        transition: border-color .12s, background .12s, color .12s; }
+  #levels button:hover { border-color: rgba(255,255,255,.45); color: #fff; }
+  #levels button .lv { color: var(--muted); font-weight: 700; }
+  #levels button.active .lv { color: #fff; }
+  #levels button .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; opacity: .5; }
+  #levels button.active { background: rgba(255,255,255,.10); color: #fff; }
+  #levels button.active .dot { opacity: 1; }
+  #levels button[data-level="CPG"] .dot { background: #8ace00; }
+  #levels button[data-level="brain"] .dot { background: #58f2b0; }
+  #levels button[data-level="tripod"] .dot { background: #4d66ff; }
+  #levels button[data-level="single"] .dot { background: #ff5a5a; }
+  #levels button[data-level="CPG"].active { border-color: #8ace00; box-shadow: 0 0 0 1px rgba(138,206,0,.55); }
+  #levels button[data-level="brain"].active { border-color: #58f2b0; box-shadow: 0 0 0 1px rgba(88,242,176,.55); }
+  #levels button[data-level="tripod"].active { border-color: #4d66ff; box-shadow: 0 0 0 1px rgba(77,102,255,.55); }
+  #levels button[data-level="single"].active { border-color: #ff5a5a; box-shadow: 0 0 0 1px rgba(255,90,90,.55); }
+
+  /* center overlay: loading / instructions / countdown / finish */
+  #overlay { position: absolute; inset: 0; z-index: 6; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 14px; text-align: center; padding: 24px;
+        background: rgba(16,18,23,.82); backdrop-filter: blur(3px); }
+  #overlay.hidden { display: none; }
+  #overlay h1 { font-size: 26px; margin: 0; }
+  #overlay p { margin: 0; color: var(--muted); font-size: 14px; max-width: 520px; line-height: 1.55; }
+  #overlay .big { font-size: 88px; font-weight: 800; line-height: 1; }
+  #overlay .err { color: #ff8a80; max-width: 480px; }
+  #overlay button { font: inherit; font-size: 15px; font-weight: 700; cursor: pointer;
+        color: #14161b; background: var(--accent); border: 0; border-radius: 8px; padding: 11px 26px; }
+  #overlay .lb { font-size: 13px; color: var(--fg); font-variant-numeric: tabular-nums;
+        background: rgba(255,255,255,.06); border-radius: 8px; padding: 10px 16px; min-width: 220px; }
+  #overlay .lb .row { display: flex; justify-content: space-between; padding: 2px 0; }
+  #overlay .lb .row.you { color: var(--accent); font-weight: 700; }
+  .spinner { width: 30px; height: 30px; border: 3px solid rgba(255,255,255,.25);
+        border-top-color: #fff; border-radius: 50%; animation: spin .9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (max-width: 820px) {
+    #stimulus-hud { width:220px; top:128px; transform:scale(.9); transform-origin:top left; }
+    #neural-hud { transform:scale(.9); transform-origin:top right; }
+    #levels button { padding:6px 8px; font-size:11px; }
+  }
+</style>
+<script type="importmap">
+{ "imports": { "three": "../shared/vendor/three/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="stage">
+  <div id="levels">
+    <button data-level="brain" class="active"><span class="dot"></span><span class="lv">AUTO:</span> MaleCNS whole brain</button>
+    <button data-level="CPG"><span class="dot"></span><span class="lv">MANUAL:</span> CPG control</button>
+    <button data-level="tripod"><span class="dot"></span><span class="lv">Level 2:</span> Tripod gait</button>
+    <button data-level="single"><span class="dot"></span><span class="lv">Level 3:</span> Individual legs</button>
+  </div>
+  <div id="hud">
+    <div id="level"><span class="chip"></span><span id="level-name">CPG control</span></div>
+    <div id="timer">0.00</div>
+    <div id="best">Best: —</div>
+  </div>
+  <div id="stats"></div>
+  <div id="neural-hud">
+    <div class="nh-title">MALECNS · 166,700 NEURONS</div>
+    <div class="nh-row"><span>brain link</span><b id="brain-link">연결 중</b></div>
+    <div class="nh-row"><span>active neurons</span><b id="brain-active">0</b></div>
+    <div class="nh-row"><span>DNp09 / MDN</span><b id="brain-fb">0.00 / 0.00</b></div>
+    <div class="nh-row"><span>DNa L / R</span><b id="brain-lr">0.00 / 0.00</b></div>
+    <div class="nh-row"><span>odor memory</span><b id="brain-memory">0.180</b></div>
+    <div class="nh-row"><span>pose mm</span><b id="physics-pose">0.0 · 0.0 · 0.0</b></div>
+    <div class="nh-row"><span>gate / contacts</span><b id="physics-contact">0 / 0</b></div>
+    <div class="nh-row"><span>movement</span><b id="flight-state">WALK · ground</b></div>
+    <div class="nh-action" id="brain-action">WAITING FOR PHYSICS</div>
+    <div class="nh-bar"><i id="brain-confidence"></i></div>
+    <div class="mode-row" id="mobility"><button data-mode="walk">걷기</button><button data-mode="auto" class="active">자동</button><button data-mode="fly">비행</button></div>
+    <div class="nh-controls"><button id="brain-learning">학습 ON</button><button id="brain-reset">뇌·학습 초기화</button><button id="upright">뒤집힘 복구</button><button id="flip-test">뒤집기 시험</button><button id="looming">MDN 직접 자극(모델) → 후진</button></div>
+  </div>
+  <div id="stimulus-hud">
+    <div class="sh-title"><span>외부 자극 실험실</span><small><b id="stimulus-count">0</b> objects</small></div>
+    <div id="reaction">자극을 읽는 중…</div>
+    <div class="sense-row"><span>시각</span><i><b id="sense-visual"></b></i><output id="sense-visual-v">0.00</output></div>
+    <div class="sense-row"><span>후각</span><i><b id="sense-odor"></b></i><output id="sense-odor-v">0.00</output></div>
+    <div class="sense-row"><span>기계</span><i><b id="sense-touch"></b></i><output id="sense-touch-v">0.00</output></div>
+    <div class="sense-row"><span>미각</span><i><b id="sense-taste"></b></i><output id="sense-taste-v">0.00</output></div>
+    <div class="sense-row"><span>온도</span><i><b id="sense-temperature"></b></i><output id="sense-temperature-v">0.00</output></div>
+    <div id="object-dock">
+      <div class="hint" id="place-hint">오브젝트를 고른 뒤 3D 바닥을 클릭해 놓으세요.</div>
+      <div class="object-grid">
+        <button data-object="food">🍎 먹이·냄새</button><button data-object="light">💡 빛</button><button data-object="threat">👁 포식자</button>
+        <button data-object="wind">🌬 바람</button><button data-object="heat">🔥 열</button><button data-object="obstacle">⬛ 장애물</button>
+      </div>
+      <div class="world-actions"><button id="demo-world">모두 배치</button><button id="shuffle-world">재배치</button><button id="clear-world">모두 지우기</button></div>
+    </div>
+  </div>
+  <div id="help"></div>
+  <div id="overlay">
+    <div class="spinner"></div>
+    <p id="overlay-msg">MuJoCo-WASM과 NeuroMechFly v2 micro-CT 몸체를 로딩 중…</p>
+  </div>
+</div>
+<script type="module" src="./game.js?v=20260912-4"></script>
+</body>
+</html>

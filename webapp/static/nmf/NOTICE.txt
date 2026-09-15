@@ -1,0 +1,22 @@
+This service includes and modifies browser application code and generated model
+assets from FlyGym / NeuroMechFly v2, revision
+38c8ec61034cd59bc5ba0de20688d4a3c0000d60.
+
+Copyright 2023-2026 The NeuroMechFly v2 Authors.
+Licensed under the Apache License, Version 2.0. The full license is available at
+licenses/FLYGYM-APACHE-2.0.txt.
+
+NeuroMechFly v2 reference:
+Wang-Chen et al. (2024), NeuroMechFly v2, Nature Methods.
+https://doi.org/10.1038/s41592-024-02497-y
+
+The MuJoCo WebAssembly runtime is from Google DeepMind's @mujoco/mujoco 3.9.0
+(Apache-2.0). Three.js 0.169.0 is MIT-licensed. Their original npm package
+license notices apply.
+
+Local modifications: MaleCNS whole-connectome WebSocket bridge, autonomous
+brain control mode, neural telemetry HUD, target waypoints, and parent dashboard
+integration. The interactive flight mode applies a transparent quasi-steady
+lift/thrust/yaw force model to the MuJoCo free body and animates the supplied
+wing geometry; it is not a CFD or measured wing-aerodynamics solver. Placeable
+stimulus objects are experimental input generators, not source-dataset objects.

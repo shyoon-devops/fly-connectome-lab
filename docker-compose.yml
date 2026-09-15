@@ -1,0 +1,14 @@
+services:
+  fly-connectome-lab:
+    build: .
+    container_name: fly-connectome-lab
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8510:8501"
+    environment:
+      TZ: Asia/Seoul
+      DEPLOYMENT_MODE: server
+    deploy:
+      resources:
+        limits:
+          memory: 4G
